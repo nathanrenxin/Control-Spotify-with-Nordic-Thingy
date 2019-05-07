@@ -1,0 +1,339 @@
+<!doctype html>
+<html>
+
+<head>
+  <title>Nordic Thingy with Spotify</title>
+  <link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css">
+  <style type="text/css">
+    #login,
+    #loggedin,
+    #playing,
+    #notPlaying,
+    #thingyConnected,
+    #test,
+    #thingy {
+      display: none;
+    }
+
+    .text-overflow {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      width: 500px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div id="login">
+      <h1>Nordic Thingy with Spotify</h1>
+      <a href="/login" class="btn btn-primary">Log in with Spotify</a>
+    </div>
+    <div id="loggedin">
+      <div id="user-profile">
+      </div>
+      <div id="oauth">
+      </div>
+      <button class="btn btn-default" id="obtain-new-token">Obtain new token using the refresh token</button>
+      <div id="playing">
+        <h2>Currently Playing</h2>
+        <div class="media">
+          <div class="pull-left">
+            <img id="song-cover" class="media-object" width="150" src="" />
+          </div>
+          <div class="media-body">
+            <dl class="dl-horizontal">
+              <dt>Title</dt>
+              <dd id="song-name" class="text-overflow"></dd>
+              <dt>Artist(s)</dt>
+              <dd id="song-artists" class="text-overflow"></dd>
+              <dt>Album</dt>
+              <dd id="song-album" class="text-overflow"></dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="notPlaying">
+      <h2>Currently Not Playing</h2>
+    </div>
+    <div id="thingy">
+      <h2>Nordic Thingy</h2>
+      <button class="btn btn-default" id="connectBtn">Connect to Thingy</button>
+    </div>
+    <div id="thingyConnected">
+      <h2>Nordic Thingy Connected</h2>
+    </div>
+    <div id="test">
+      <button class="btn btn-default" id="testBtn">Test</button>
+    </div>
+  </div>
+
+  <script id="user-profile-template" type="text/x-handlebars-template">
+      <h1>Logged in as {{display_name}}</h1>
+      <div class="media">
+        <div class="pull-left">
+          <img class="media-object" width="150" src="{{images.0.url}}" />
+        </div>
+        <div class="media-body">
+          <dl class="dl-horizontal">
+            <dt>Display name</dt><dd class="clearfix">{{display_name}}</dd>
+            <dt>Id</dt><dd>{{id}}</dd>
+            <dt>Email</dt><dd>{{email}}</dd>
+            <dt>Spotify URI</dt><dd><a href="{{external_urls.spotify}}">{{external_urls.spotify}}</a></dd>
+            <dt>Link</dt><dd><a href="{{href}}">{{href}}</a></dd>
+            <dt>Profile Image</dt><dd class="clearfix"><a href="{{images.0.url}}">{{images.0.url}}</a></dd>
+            <dt>Country</dt><dd>{{country}}</dd>
+          </dl>
+        </div>
+      </div>
+    </script>
+
+  <script id="oauth-template" type="text/x-handlebars-template">
+      <h2>oAuth info</h2>
+      <dl class="dl-horizontal">
+        <dt>Access token</dt><dd class="text-overflow">{{access_token}}</dd>
+        <dt>Refresh token</dt><dd class="text-overflow">{{refresh_token}}</dd>
+      </dl>
+    </script>
+
+  <script src="spotify-web-api.js"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/handlebars.js/2.0.0-alpha.1/handlebars.min.js"></script>
+  <script src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
+
+  <script type="module">
+    import Thingy from './js/Thingy.js';
+    const thingy = new Thingy();
+    var tiltActivated = false, thingyIsHorisontal = false;
+    var spotifyApi = new SpotifyWebApi();
+    var isPlaying;
+    var spotifyCurrentDevice;
+
+    (function () {
+
+      /**
+       * Obtains parameters from the hash of the URL
+       * @return Object
+       */
+      function getHashParams() {
+        var hashParams = {};
+        var e, r = /([^&;=]+)=?([^&;]*)/g,
+          q = window.location.hash.substring(1);
+        while (e = r.exec(q)) {
+          hashParams[e[1]] = decodeURIComponent(e[2]);
+        }
+        return hashParams;
+      }
+
+      var userProfileSource = document.getElementById('user-profile-template').innerHTML,
+        userProfileTemplate = Handlebars.compile(userProfileSource),
+        userProfilePlaceholder = document.getElementById('user-profile');
+
+      var oauthSource = document.getElementById('oauth-template').innerHTML,
+        oauthTemplate = Handlebars.compile(oauthSource),
+        oauthPlaceholder = document.getElementById('oauth');
+
+      var params = getHashParams();
+
+      var access_token = params.access_token,
+        refresh_token = params.refresh_token,
+        error = params.error;
+
+      if (error) {
+        alert('There was an error during the authentication');
+      } else {
+        if (access_token) {
+          // render oauth info
+          oauthPlaceholder.innerHTML = oauthTemplate({
+            access_token: access_token,
+            refresh_token: refresh_token
+          });
+
+          $.ajax({
+            url: 'https://api.spotify.com/v1/me',
+            headers: {
+              'Authorization': 'Bearer ' + access_token
+            },
+            success: function (response) {
+              userProfilePlaceholder.innerHTML = userProfileTemplate(response);
+
+              spotifyApi.setAccessToken(access_token);
+
+              spotifyApi.getMyDevices()
+                .then(
+                  function (data) {
+                    for (let i = 0; i < data.length; i++) {
+                      if (data[i].isActive == true) {
+                        spotifyCurrentDevice = data[i].id;
+                      }
+                    }
+                  },
+                  function (error) { }
+                );
+              window.setInterval(function () {
+
+                // check whether a song is playing or not
+                spotifyApi.getMyCurrentPlaybackState()
+                  .then(
+                    function (data) {
+                      isPlaying = data.is_playing;
+                    },
+                    function (error) { console.log(error); }
+                  );
+                if (isPlaying) {
+                  // gets the current track every 2 seconds
+                  spotifyApi.getMyCurrentPlayingTrack()
+                    .then(
+                      function (data) {
+                        if (data.item != undefined) {
+                          // if the track changed, update the data on screen
+                          document.getElementById('song-cover').src = data.item.album.images[1].url;
+                          document.getElementById('song-name').innerHTML = sliceNowPlaying(data.item.name);
+                          let artists = data.item.artists;
+                          let listArtists = "";
+                          for (let i = 0; i < artists.length; i++) {
+                            if (i == 0) {
+                              listArtists += artists[i].name;
+                            }
+                            else {
+                              listArtists += ", " + artists[i].name;
+                            }
+                          }
+                          document.getElementById('song-artists').innerHTML = sliceNowPlaying(listArtists);
+                          document.getElementById('song-album').innerHTML = sliceNowPlaying(data.item.album.name);
+                          $('#playing').show();
+                          $('#notPlaying').hide();
+                        }
+                      },
+                      function (err) { console.log(err); });
+                } else {
+                  $('#playing').hide();
+                  $('#notPlaying').show();
+
+                }
+              }, 2000);
+
+              $('#login').hide();
+              $('#loggedin').show();
+              $('#thingy').show();
+              //$('#test').show();
+            }
+          });
+        } else {
+          // render initial screen
+          $('#login').show();
+          $('#loggedin').hide();
+          $('#playing').hide();
+          $('#notPlaying').hide();
+          $('#thingy').hide();
+          $('#thingyConnected').hide();
+          $('#test').hide();
+        }
+
+        document.getElementById('obtain-new-token').addEventListener('click', function () {
+          $.ajax({
+            url: '/refresh_token',
+            data: {
+              'refresh_token': refresh_token
+            }
+          }).done(function (data) {
+            access_token = data.access_token;
+            oauthPlaceholder.innerHTML = oauthTemplate({
+              access_token: access_token,
+              refresh_token: refresh_token
+            });
+          });
+        }, false);
+
+        document.querySelector("#connectBtn").addEventListener("click", async () => {
+          start(thingy);
+        });
+
+        document.querySelector("#testBtn").addEventListener("click", async () => {
+          //spotifyApi.skipToNext({ spotifyCurrentDevice });
+          //spotifyApi.skipToPrevious({ spotifyCurrentDevice });
+          //spotifyApi.pause({ spotifyCurrentDevice });
+          spotifyApi.play({ spotifyCurrentDevice });
+        });
+      }
+    })();
+
+    // shorten strings if they're too long to be displayed
+    function sliceNowPlaying(str) {
+      if (str.length >= 40) {
+        return (str.slice(0, 37) + "...");
+      } else {
+        return str;
+      }
+    }
+
+    async function start(device) {
+      try {
+        await device.connect();
+        device.addEventListener("gravityvector", thingyStatusTracker);
+        await device.gravityvector.start();
+        $('#thingy').hide();
+        $('#thingyConnected').show();
+      } catch (error) {
+        console.error(error);
+      }
+    }
+
+    async function changeColor(color) {
+      const newLedConfiguration = {
+        mode: "constant",
+        red: color[0],
+        green: color[1],
+        blue: color[2],
+      }
+
+      thingy.led.write(newLedConfiguration);
+    }
+
+    async function blink() {
+      changeColor([0, 0, 0])
+      setTimeout(function () { changeColor([0, 255, 0]) }, 200);
+    }
+
+    const thingyStatusTracker = data => {
+      const tempData = data.detail;
+      if (tempData.value.y <= -5) {
+        if (!tiltActivated) {
+          console.log("changing to a next track");
+          blink();
+          spotifyApi.skipToNext({ spotifyCurrentDevice });
+          tiltActivated = true;
+        }
+      } else if (tempData.value.y >= 5) {
+        if (!tiltActivated) {
+          console.log("changing to a previous track");
+          blink();
+          spotifyApi.skipToPrevious({ spotifyCurrentDevice });
+          tiltActivated = true;
+        }
+      } else {
+        tiltActivated = false;
+      }
+
+      if (tempData.value.z <= -9) {
+        if (!thingyIsHorisontal) {
+          console.log("stop");
+          changeColor([255, 0, 0]);
+          spotifyApi.pause({ spotifyCurrentDevice });
+          thingyIsHorisontal = true;
+        }
+      } else {
+        if (thingyIsHorisontal) {
+          console.log("play");
+          changeColor([0, 255, 0]);
+          spotifyApi.play({ spotifyCurrentDevice });
+        }
+        thingyIsHorisontal = false;
+      }
+    }
+
+  </script>
+</body>
+
+</html>
