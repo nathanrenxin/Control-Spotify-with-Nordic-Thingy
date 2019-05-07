@@ -1,6 +1,14 @@
 # Nordic Thingy with Spotify
 
-ID2012 Project
+ID2012 Ubiquitous Computing Project where we use Nordic Thingy to control Spotify playback:
+
+1. Right tilt to skip to next track
+2. Left tilt to skip to previous track
+3. Put Thingy down to pause the track
+4. Stand Thingy up to play the track
+
+Thingy also gives visual cues when changing the playback. The LED blinks when tracks are skipped. When the playback stops, LED switches to red colour, and it emits green light when playback starts.
+
 
 ## Installation
 
